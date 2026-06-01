@@ -1,0 +1,182 @@
+# ==============================================================================
+# .dockerignore - Docker Build Context Optimization
+# Purplle Store Intelligence Challenge
+#
+# Specifies files and directories to exclude from the Docker build context.
+# This reduces build time and final image size by not copying unnecessary files.
+#
+# Key Principle: Only include files needed at runtime in the build context
+# ==============================================================================
+
+# ==============================================================================
+# Version Control & Git
+# ==============================================================================
+.git/
+.gitignore
+.gitattributes
+
+# ==============================================================================
+# Development & IDE
+# ==============================================================================
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+.env.local
+.env.*.local
+
+# ==============================================================================
+# Python & Virtual Environments
+# ==============================================================================
+venv/
+env/
+ENV/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytype/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ==============================================================================
+# Testing & Pytest
+# ==============================================================================
+.pytest_cache/
+.pytest_tmp/
+pytest-cache-files-*/
+tests/_runtime_pipeline/
+.coverage
+htmlcov/
+.hypothesis/
+*.cover
+coverage.xml
+*.log
+
+# ==============================================================================
+# Docker & Container
+# ==============================================================================
+Dockerfile.dev
+docker-compose.dev.yml
+docker-compose.override.yml
+.dockerignore
+
+# ==============================================================================
+# CI/CD Pipelines
+# ==============================================================================
+.github/
+.gitlab-ci.yml
+.circleci/
+.travis.yml
+Jenkinsfile
+
+# ==============================================================================
+# Documentation & Markdown
+# ==============================================================================
+docs/
+*.md
+LICENSE
+CHANGELOG.md
+README.md
+DOCKER.md
+
+# ==============================================================================
+# Node.js (if frontend exists)
+# ==============================================================================
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# ==============================================================================
+# Environment-Specific Files
+# ==============================================================================
+.env.example
+.env.prod
+.env.staging
+*.env.local
+
+# ==============================================================================
+# Build Artifacts
+# ==============================================================================
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+
+# ==============================================================================
+# OS-Specific Files
+# ==============================================================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ==============================================================================
+# IDE & Editor Caches
+# ==============================================================================
+.vscode/
+.idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+.atom/
+.editorconfig
+.prettierrc
+.eslintrc*
+.stylelintrc*
+
+# ==============================================================================
+# Miscellaneous
+# ==============================================================================
+*.bak
+*.tmp
+temp/
+tmp/
+*.orig
+.cache/
+
+# ==============================================================================
+# Notes
+# ==============================================================================
+# This file is crucial for Docker build performance:
+# - Reduces build context size (smaller COPY operations)
+# - Reduces network bandwidth (smaller upload to Docker daemon)
+# - Speeds up build cache invalidation (fewer file changes)
+# - Improves security (excludes sensitive files like .env)
+#
+# Example Impact:
+# - Without .dockerignore: 500 MB+ build context
+# - With .dockerignore: 100 MB build context
+# - Build time reduction: ~30-40% faster
+#
+# Changes to ignored files won't trigger Docker cache invalidation,
+# enabling faster local iterations.

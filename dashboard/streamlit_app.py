@@ -1,246 +1,287 @@
-#!/usr/bin/env python3
-"""
-Purplle Store Intelligence - Streamlit Dashboard Client
-CCTV Retail Analytics Visualizer
-
-This module serves as the primary visual orchestrator for the retail analytics platform.
-It statefully connects to Uvicorn REST APIs (or falls back to scanning local events JSON files)
-and coordinates rendering through modular components.
-"""
-
+import json
 import os
-import sys
-import requests
 import streamlit as st
+import pandas as pd
+import plotly.express as px
 
-# Ensure root workspace directory is on sys.path to allow clean imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Import modular GUI components
-from dashboard.components.selectors import render_camera_selector, render_confidence_slider, render_system_status
-from dashboard.components.kpi_cards import render_kpi_cards
-from dashboard.components.charts import render_funnel_chart, render_dwell_histogram, render_camera_workload
-from dashboard.components.heatmap import render_spatial_heatmap
-from dashboard.components.anomaly_table import render_anomalies_panel
-
-# Import core analytical fallback functions if API is offline
-try:
-    from app.ingestion import store as local_store, ingest_json_file
-    from app.metrics import compile_dashboard_summary, get_active_visitors
-    from app.funnel import compile_funnel_dashboard
-    from app.anomalies import analyze_store_anomalies
-except ImportError:
-    pass
-
-# ==============================================================================
-# Page Configuration & Brand Styles
-# ==============================================================================
+# =========================================
+# PAGE CONFIG
+# =========================================
 st.set_page_config(
-    page_title="Purplle Store Intelligence",
+    page_title="Store Intelligence Dashboard",
     page_icon="🛍️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom Brand Color Palette Styling
+# =========================================
+# CUSTOM CSS
+# =========================================
 st.markdown("""
-    <style>
-        .block-container { padding-top: 1.5rem; padding-bottom: 1.5rem; }
-        .stMetric { background-color: #f3e8ff; padding: 12px; border-radius: 8px; border-left: 5px solid #a855f7; }
-        .stMetric label { color: #581c87 !important; font-weight: 600; }
-        .status-connected { color: #22c55e; font-weight: bold; }
-        .status-standalone { color: #3b82f6; font-weight: bold; }
-        .status-offline { color: #ef4444; font-weight: bold; }
-        h1, h2, h3 { color: #4a044e; }
-    </style>
+<style>
+
+/* Main App Background */
+.stApp {
+    background: linear-gradient(
+        135deg,
+        #0f172a,
+        #111827,
+        #1e293b
+    );
+    color: white;
+}
+
+/* Remove white blocks */
+[data-testid="stAppViewContainer"] {
+    background: transparent;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background: #111827;
+    border-right: 1px solid #374151;
+}
+
+/* Main container */
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+}
+
+/* Metric cards */
+.metric-card {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 18px;
+    padding: 24px;
+    text-align: center;
+    box-shadow: 0px 8px 24px rgba(0,0,0,0.4);
+    transition: 0.3s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0px 12px 30px rgba(0,0,0,0.6);
+}
+
+/* KPI Title */
+.metric-title {
+    font-size: 16px;
+    color: #9CA3AF;
+    margin-bottom: 10px;
+}
+
+/* KPI Value */
+.metric-value {
+    font-size: 34px;
+    font-weight: bold;
+    color: #F9FAFB;
+}
+
+/* Headers */
+h1, h2, h3 {
+    color: #F9FAFB !important;
+}
+
+/* Table Styling */
+[data-testid="stDataFrame"] {
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* Buttons */
+.stButton>button {
+    border-radius: 10px;
+    background: linear-gradient(90deg, #2563EB, #7C3AED);
+    color: white;
+    border: none;
+}
+
+/* Success box */
+.stAlert {
+    border-radius: 12px;
+}
+
+</style>
 """, unsafe_allow_html=True)
 
-# ==============================================================================
-# Dynamic Backend Connection Manager
-# ==============================================================================
-API_URL = "http://localhost:8000"
+# =========================================
+# HEADER
+# =========================================
+st.title("🛍️ Store Intelligence Dashboard")
+st.caption("AI-Powered Retail CCTV Analytics Platform")
 
-def check_api_connection() -> str:
-    """
-    Validates if the FastAPI server is online.
-    Returns 'api', 'standalone', or 'empty'.
-    """
-    try:
-        response = requests.get(f"{API_URL}/health/live", timeout=1)
-        if response.status_code == 200:
-            return "api"
-    except Exception:
-        pass
-        
-    # Check if local logs folder has telemetry to load
-    event_dir = "data/events"
-    if os.path.exists(event_dir):
-        json_files = [f for f in os.listdir(event_dir) if f.endswith(".json") and f != "test_events.json"]
-        if json_files:
-            return "standalone"
-            
-    return "empty"
+# =========================================
+# LOAD DATA
+# =========================================
+DATA_PATH = "data/analytics/summary.json"
 
-# ==============================================================================
-# Local Data Loader & Aggregator Fallback
-# ==============================================================================
-@st.cache_data(ttl=5) # Cache fallback for 5 seconds to reduce IO load
-def fetch_local_fallback_data() -> dict:
-    """
-    Fallback data loader. Scans data/events/*.json, loads all events in memory,
-    and runs local analytical computations to restore dashboard functionality.
-    """
-    local_store.clear()
-    event_dir = "data/events"
-    
-    if os.path.exists(event_dir):
-        for file_name in os.listdir(event_dir):
-            if file_name.endswith(".json") and file_name != "test_events.json":
-                full_path = os.path.join(event_dir, file_name)
-                ingest_json_file(full_path)
-                
-    events = local_store.get_all_events()
-    
-    if not events:
-        return {}
-        
-    # Compile analytics locally using modular app engine functions
-    summary = compile_dashboard_summary(events)
-    funnel = compile_funnel_dashboard(events)
-    anomalies = analyze_store_anomalies(events)
-    
-    return {
-        "summary": summary,
-        "funnel": funnel,
-        "anomalies": [a.model_dump() for a in anomalies],
-        "raw_events": events
-    }
-
-# ==============================================================================
-# API REST Data Ingestion
-# ==============================================================================
-def fetch_api_data() -> dict:
-    """
-    Fetches processed analytics datasets directly from the active FastAPI server.
-    """
-    try:
-        summary_resp = requests.get(f"{API_URL}/api/analytics/summary", timeout=2).json()
-        funnel_resp = requests.get(f"{API_URL}/api/analytics/funnel", timeout=2).json()
-        anomalies_resp = requests.get(f"{API_URL}/api/analytics/anomalies", timeout=2).json()
-        
-        # Pull raw events via local read if possible for heatmap coordinates plotting
-        events = []
-        event_dir = "data/events"
-        local_store.clear()
-        if os.path.exists(event_dir):
-            for file_name in os.listdir(event_dir):
-                if file_name.endswith(".json") and file_name != "test_events.json":
-                    ingest_json_file(os.path.join(event_dir, file_name))
-            events = local_store.get_all_events()
-            
-        return {
-            "summary": summary_resp,
-            "funnel": funnel_resp,
-            "anomalies": anomalies_resp,
-            "raw_events": events
-        }
-    except Exception as e:
-        st.error(f"API request failed: {e}. Attempting local logs loading...")
-        return {}
-
-# ==============================================================================
-# Sidebar Renders & Filters Binding
-# ==============================================================================
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/e/e7/Shopping_Bag_Icon.svg", width=80)
-st.sidebar.title("Store Intelligence")
-st.sidebar.markdown("CCTV Customer Journey Dashboard")
-st.sidebar.markdown("---")
-
-# Active connection status check
-conn_status = check_api_connection()
-render_system_status(conn_status)
-st.sidebar.markdown("---")
-
-# Active filters dropdown & slider
-camera_list = ["All Cameras", "entry_camera", "billing_camera", "floor_camera1", "floor_camera2", "storage_area"]
-selected_camera = render_camera_selector(camera_list)
-conf_threshold = render_confidence_slider(default_val=0.25)
-
-st.sidebar.markdown("---")
-st.sidebar.info(
-    "This platform processes retail CCTV feeds in batch, extracts "
-    "persistent track IDs, maps customer journeys, and detects loitering or trespassing."
-)
-
-# ==============================================================================
-# Data Resolution & Filter Binding
-# ==============================================================================
-data = {}
-if conn_status == "api":
-    data = fetch_api_data()
-elif conn_status == "standalone":
-    data = fetch_local_fallback_data()
-
-# Render warning screen if no files have been processed
-if not data or "raw_events" not in data or not data["raw_events"]:
-    st.title("🛍️ Purplle Store Intelligence Challenge")
-    st.warning(
-        "No retail CCTV telemetry detected. Ensure that you have placed CCTV mp4 files in "
-        "`data/videos/` and executed the tracking pipeline runner `pipeline/run.sh` to generate event logs."
-    )
-    st.info("Execute: `bash pipeline/run.sh` to begin tracking.")
+if not os.path.exists(DATA_PATH):
+    st.error("summary.json not found. Run analytics first.")
     st.stop()
 
-# Filter raw events based on sidebar controls
-raw_events = data["raw_events"]
-filtered_events = [e for e in raw_events if e.confidence >= conf_threshold]
+with open(DATA_PATH, "r") as f:
+    data = json.load(f)
+
+summary = data.get("summary", [])
+
+if not summary:
+    st.warning("No analytics data available.")
+    st.stop()
+
+# =========================================
+# DATAFRAME
+# =========================================
+df = pd.DataFrame(summary)
+
+# =========================================
+# CAMERA NAME MAPPING
+# =========================================
+camera_map = {
+    "floor_camera1_events.json": "Floor Camera 1",
+    "floor_camera2_events.json": "Floor Camera",
+    "billing_camera_events.json": "Billing Camera",
+    "entry_camera_events.json": "Entry Camera",
+    "storage_area_events.json": "Storage Area"
+}
+
+df["camera_display"] = df["camera"].apply(
+    lambda x: camera_map.get(x, x)
+)
+
+# =========================================
+# SIDEBAR
+# =========================================
+st.sidebar.title("📌 Navigation")
+
+selected_camera = st.sidebar.selectbox(
+    "Select Camera",
+    ["All Cameras"] + list(df["camera_display"].unique())
+)
 
 if selected_camera != "All Cameras":
-    filtered_events = [e for e in filtered_events if e.camera_id == selected_camera]
-    
-# Re-compile metrics dynamically if filter parameters change
-if len(filtered_events) != len(raw_events):
-    summary_data = compile_dashboard_summary(filtered_events)
-    funnel_data = compile_funnel_dashboard(filtered_events)
-    anomalies_data = [a.model_dump() for a in analyze_store_anomalies(filtered_events)]
+    filtered_df = df[df["camera_display"] == selected_camera]
 else:
-    summary_data = data["summary"]
-    funnel_data = data["funnel"]
-    anomalies_data = data["anomalies"]
+    filtered_df = df
 
-# ==============================================================================
-# Layout UI Renders
-# ==============================================================================
-st.title("🛍️ Purplle Store Intelligence Analytics Dashboard")
-st.markdown("Real-Time CCTV Customer Journeys & Spatial Funnel Telemetry")
+# =========================================
+# KPI CALCULATIONS
+# =========================================
+total_customers = filtered_df["total_unique_people"].sum()
+active_cameras = filtered_df["camera_display"].nunique()
+
+top_camera_row = filtered_df.loc[
+    filtered_df["total_unique_people"].idxmax()
+]
+
+top_camera = top_camera_row["camera_display"]
+top_visitors = top_camera_row["total_unique_people"]
+
+# =========================================
+# KPI CARDS
+# =========================================
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-title">👥 Total Visitors</div>
+        <div class="metric-value">{int(total_customers)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-title">📷 Active Cameras</div>
+        <div class="metric-value">{active_cameras}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col3:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-title">🔥 Top Zone</div>
+        <div class="metric-value">{top_camera}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# =========================================
+# BAR CHART
+# =========================================
+st.subheader("📊 Visitor Distribution")
+
+bar_fig = px.bar(
+    filtered_df,
+    x="camera_display",
+    y="total_unique_people",
+    text="total_unique_people",
+    color="total_unique_people",
+    template="plotly_dark",
+    title="Visitors Per Camera"
+)
+
+bar_fig.update_layout(
+    xaxis_title="Camera",
+    yaxis_title="Visitors",
+    height=500
+)
+
+st.plotly_chart(bar_fig, use_container_width=True)
+
+# =========================================
+# PIE CHART
+# =========================================
+st.subheader("🥧 Traffic Share")
+
+pie_fig = px.pie(
+    filtered_df,
+    names="camera_display",
+    values="total_unique_people",
+    template="plotly_dark",
+    hole=0.4
+)
+
+pie_fig.update_layout(height=500)
+
+st.plotly_chart(pie_fig, use_container_width=True)
+
+# =========================================
+# ANALYTICS TABLE
+# =========================================
+st.subheader("📋 Detailed Analytics")
+
+display_df = filtered_df[[
+    "camera_display",
+    "total_unique_people"
+]].rename(columns={
+    "camera_display": "Camera",
+    "total_unique_people": "Visitors"
+})
+
+st.dataframe(display_df, use_container_width=True)
+
+# =========================================
+# AI INSIGHTS
+# =========================================
+st.subheader("🧠 AI Insights")
+
+st.info(f"""
+✅ Total Footfall: {int(total_customers)} visitors
+
+✅ Most Active Zone: {top_camera}
+
+✅ Peak Activity: {top_visitors} visitors
+
+✅ Monitoring Coverage: {active_cameras} active cameras
+""")
+
+# =========================================
+# FOOTER
+# =========================================
 st.markdown("---")
-
-# Render Reusable KPIs Row
-kpi = summary_data.get("kpis", {})
-render_kpi_cards(kpi, conn_status)
-st.markdown("---")
-
-# Tab Controller layout
-tab_funnel, tab_traffic, tab_heatmap, tab_alerts = st.tabs([
-    "📈 Retail Conversion Funnel",
-    "📊 Dwell & Traffic Metrics",
-    "🔥 Spatial Footprint Heatmap",
-    "⚠️ Security Anomaly Alerts"
-])
-
-# Render modular components into tabs
-with tab_funnel:
-    render_funnel_chart(funnel_data)
-
-with tab_traffic:
-    col_dwell, col_cam = st.columns(2)
-    with col_dwell:
-        render_dwell_histogram(summary_data.get("dwell_distribution", {}))
-    with col_cam:
-        render_camera_workload(summary_data.get("camera_rankings", []))
-
-with tab_heatmap:
-    render_spatial_heatmap(filtered_events, selected_camera)
-
-with tab_alerts:
-    render_anomalies_panel(anomalies_data)
+st.caption("🚀 Powered by YOLOv8 + ByteTrack + FastAPI + Streamlit")
+st.caption("@Sampathrr")

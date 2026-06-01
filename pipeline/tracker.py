@@ -314,7 +314,7 @@ def process_video_tracking(
             # Periodic logging
             if frame_idx % 50 == 0 or frame_idx == total_frames:
                 elapsed = time.time() - start_time
-                curr_fps = frame_idx / elapsed
+                curr_fps = frame_idx / elapsed if elapsed > 0 else 0
                 logger.info(
                     f"Frame {frame_idx}/{total_frames} | "
                     f"Active tracks: {len(tracks)} | "

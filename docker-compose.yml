@@ -1,0 +1,292 @@
+# ==============================================================================
+# docker-compose.yml: Production-Ready Store Intelligence Stack
+# Purplle Store Intelligence Challenge
+#
+# Multi-service orchestration for CCTV analytics platform:
+# - FastAPI backend (REST API gateway)
+# - Streamlit dashboard (Interactive analytics UI)
+# - Shared data volumes (videos, outputs, events)
+#
+# Usage:
+#   docker-compose up                    # Start all services
+#   docker-compose up -d                 # Start in detached mode
+#   docker-compose down                  # Stop all services
+#   docker-compose logs -f api           # Stream API logs
+#   docker-compose exec api /bin/bash    # Shell into API container
+# ==============================================================================
+
+version: "3.8"
+
+# ==============================================================================
+# Services Definition
+# ==============================================================================
+services:
+
+  # ============================================================================
+  # FastAPI Backend Service
+  # ============================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: store-intelligence:api-latest
+    container_name: store-intelligence-api
+    
+    # Service entrypoint: run Uvicorn ASGI server
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+    
+    # Port mapping: container:host
+    ports:
+      - "${API_PORT:-8000}:8000"
+    
+    # Environment variables
+    environment:
+      # Python environment
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      
+      # Service configuration
+      - SERVICE_NAME=store-intelligence-api
+      - SERVICE_VERSION=1.0.0
+      - ENV=${ENV:-development}
+      
+      # API configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_LOG_LEVEL=${API_LOG_LEVEL:-INFO}
+      
+      # CORS configuration (for Streamlit dashboard access)
+      - CORS_ORIGINS=["http://localhost:8501", "http://dashboard:8501"]
+      
+      # Data directory (must match volume mount)
+      - DATA_DIR=/data
+      - EVENTS_DIR=/data/events
+      - OUTPUTS_DIR=/data/outputs
+    
+    # Volume mounts
+    volumes:
+      # Shared data directory (videos, events, outputs)
+      - ./data:/data:rw
+      
+      # Hot reload support during development
+      - ./app:/app/app:ro
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    
+    # Networking
+    networks:
+      - store-intelligence-net
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  
+  # ============================================================================
+  # Streamlit Dashboard Service
+  # ============================================================================
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: store-intelligence:dashboard-latest
+    container_name: store-intelligence-dashboard
+    
+    # Service entrypoint: run Streamlit app
+    command: >
+      streamlit run dashboard/streamlit_app.py
+        --server.port=8501
+        --server.address=0.0.0.0
+        --server.runOnSave=true
+        --logger.level=info
+    
+    # Port mapping: container:host
+    ports:
+      - "${DASHBOARD_PORT:-8501}:8501"
+    
+    # Environment variables
+    environment:
+      # Python environment
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      
+      # Service configuration
+      - SERVICE_NAME=store-intelligence-dashboard
+      - ENV=${ENV:-development}
+      
+      # Streamlit configuration
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_RUN_ON_SAVE=true
+      - STREAMLIT_LOGGER_LEVEL=info
+      - STREAMLIT_CLIENT_SHOW_ERROR_DETAILS=true
+      
+      # API endpoint (for connecting to FastAPI backend)
+      - API_BASE_URL=${API_BASE_URL:-http://api:8000}
+      - API_HOST=api
+      - API_PORT=8000
+      
+      # Data directory (must match volume mount)
+      - DATA_DIR=/data
+      - EVENTS_DIR=/data/events
+      - OUTPUTS_DIR=/data/outputs
+    
+    # Volume mounts
+    volumes:
+      # Shared data directory (videos, events, outputs)
+      - ./data:/data:ro
+      
+      # Hot reload support during development
+      - ./dashboard:/app/dashboard:ro
+      - ./app:/app/app:ro
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    
+    # Networking
+    networks:
+      - store-intelligence-net
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    
+    # Dependency ordering
+    depends_on:
+      - api
+  
+  # ============================================================================
+  # Data Volume Service (Initialization & Validation)
+  # ============================================================================
+  data-volume:
+    image: busybox:latest
+    container_name: store-intelligence-data-volume
+    
+    # Initialize data directories if they don't exist
+    command: >
+      sh -c "
+        mkdir -p /data/videos /data/events /data/outputs /data/logs &&
+        echo 'Data directories initialized' &&
+        ls -la /data
+      "
+    
+    # Volume mount for data initialization
+    volumes:
+      - ./data:/data:rw
+    
+    # Don't keep container running after initialization
+    profiles:
+      - init
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ==============================================================================
+# Volumes Definition
+# ==============================================================================
+volumes:
+  data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data
+
+# ==============================================================================
+# Networks Definition
+# ==============================================================================
+networks:
+  store-intelligence-net:
+    driver: bridge
+    driver_opts:
+      # Enable IPv6 if needed
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+
+# ==============================================================================
+# Configuration Notes
+# ==============================================================================
+# Environment Variables (configurable via .env or CLI):
+#   API_PORT                 - FastAPI port (default: 8000)
+#   DASHBOARD_PORT           - Streamlit port (default: 8501)
+#   API_BASE_URL             - API endpoint for dashboard (default: http://api:8000)
+#   API_LOG_LEVEL            - API logging level (default: INFO)
+#   ENV                      - Environment (development/staging/production)
+#
+# Service Dependencies:
+#   - dashboard depends on api (waits for API startup)
+#   - both api and dashboard depend on data-volume initialization
+#
+# Health Checks:
+#   - api: HTTP GET /health endpoint (30s interval)
+#   - dashboard: Streamlit process running (implicit)
+#
+# Logging:
+#   - All services log to JSON format with rotation (100m max, 10 files)
+#   - View logs: docker-compose logs -f [service_name]
+#
+# Resource Allocation:
+#   - api: 2 CPUs max, 2GB memory max; 0.5 CPU / 512MB reserved
+#   - dashboard: 1 CPU max, 1GB memory max; 0.25 CPU / 256MB reserved
+#
+# Development Workflow:
+#   1. docker-compose up                           # Start stack
+#   2. Edit code (hot reload enabled for both services)
+#   3. docker-compose logs -f                      # Monitor logs
+#   4. docker-compose exec api /bin/bash           # Debug API
+#   5. docker-compose down                         # Stop stack
+#
+# Production Deployment:
+#   1. Set ENV=production in .env
+#   2. Disable reload: remove --reload flag from api command
+#   3. Configure API_BASE_URL to external API endpoint
+#   4. Use docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Common Commands:
+#   docker-compose build                           # Rebuild images
+#   docker-compose up -d                           # Start in background
+#   docker-compose logs -f api                     # Stream API logs
+#   docker-compose ps                              # List running services
+#   docker-compose exec api python -c "import app" # Test imports
+#   docker-compose down -v                         # Stop and remove volumes

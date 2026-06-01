@@ -85,8 +85,9 @@ for video in "${videos[@]}"; do
             --video_path "$video" \
             --events_path "$output_events" \
             --output_path "$heatmap_img" \
-            --intensity 10.0 \
-            --alpha 0.55 >> "$log_file" 2>&1; then
+            --intensity 1.5 \
+            --alpha 0.55 \
+            --radius 25 >> "$log_file" 2>&1; then
             echo "  - Heatmap saved: $heatmap_img"
         else
             echo "  - [WARNING] Failed to generate heatmap overlay. See log: $log_file"

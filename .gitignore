@@ -1,4 +1,32 @@
+# Data & Videos
 data/
+*.mp4
+*.avi
+*.mov
+
+# Python environments
 venv/
+.venv/
+
+# Python cache
 __pycache__/
+*.pyc
+
+# Pytest
+.pytest_cache/
+.pytest_tmp/
+pytest-cache-files-*/
+
+# Runtime outputs
+tests/_runtime_pipeline/
+outputs/
+# Environment variables
 .env
+
+# Model weights
+*.pt
+*.pth
+
+# OS files
+.DS_Store
+Thumbs.db

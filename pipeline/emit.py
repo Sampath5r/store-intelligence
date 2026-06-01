@@ -114,6 +114,13 @@ class EventEmitter:
         
         # 1. Parse active detections in current frame
         for track in tracks:
+            required_fields = {"track_id", "bbox", "confidence"}
+            missing_fields = required_fields.difference(track.keys())
+            if missing_fields:
+                missing = ", ".join(sorted(missing_fields))
+                logger.error(f"Malformed track payload missing required field(s): {missing}")
+                raise ValueError(f"Malformed track payload missing required field(s): {missing}")
+
             track_id = int(track["track_id"])
             bbox = [int(coord) for coord in track["bbox"]]
             confidence = float(track["confidence"])
